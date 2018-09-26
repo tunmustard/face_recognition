@@ -1,8 +1,59 @@
-# This is a sample Dockerfile you can modify to deploy your own app based on face_recognition
+FROM ubuntu:16.04
 
-FROM python:3.6-slim-stretch
 
-RUN apt-get -y update
+RUN apt-get update
+RUN apt-get install --no-install-recommends -y apt-utils software-properties-common curl nano unzip openssh-server
+RUN apt-get install -y python3 python3-dev python-distribute python3-pip git
+
+# main python packages
+RUN pip3 install --upgrade pip
+RUN pip3 install --upgrade numpy scipy matplotlib scikit-learn pandas seaborn plotly jupyter statsmodels
+RUN pip3 install --upgrade nose tqdm pydot pydotplus watermark geopy joblib
+
+# Jupyter configs
+RUN jupyter notebook --allow-root --generate-config -y
+RUN echo "c.NotebookApp.password = ''" >> ~/.jupyter/jupyter_notebook_config.py
+RUN echo "c.NotebookApp.token = ''" >> ~/.jupyter/jupyter_notebook_config.py
+RUN jupyter nbextension enable --py --sys-prefix widgetsnbextension
+
+# TensorFlow 
+RUN pip3 install --upgrade tensorflow  
+
+# Keras with TensorFlow backend
+RUN pip3 install --upgrade keras
+
+# Graphviz, visualizing trees
+RUN apt-get -y install graphviz 
+
+# boost
+RUN apt-get -y install libboost-program-options-dev zlib1g-dev libboost-python-dev
+
+RUN apt-get update
+
+# JDK --fix-missing
+RUN apt-get -y  install openjdk-8-jdk
+ENV CPLUS_INCLUDE_PATH=/usr/lib/jvm/java-8-openjdk-amd64/include/linux:/usr/lib/jvm/java-1.8.0-openjdk-amd64/include
+
+RUN apt-get -y install cmake 
+
+# LightGBM
+RUN cd /usr/local/src && git clone --recursive --depth 1 https://github.com/Microsoft/LightGBM && \
+    cd LightGBM && mkdir build && cd build && cmake .. && make -j $(nproc) 
+
+# LightGBM python wrapper
+RUN cd /usr/local/src/LightGBM/python-package && python3 setup.py install 
+
+# CatBoost
+RUN pip3 install --upgrade catboost
+
+# PyTorch
+RUN pip3 install http://download.pytorch.org/whl/cpu/torch-0.4.0-cp35-cp35m-linux_x86_64.whl 
+RUN pip3 install --upgrade torchvision
+
+# Facebook Prophet
+RUN pip3 install --upgrade pystan cython
+RUN pip3 install --upgrade fbprophet
+
 RUN apt-get install -y --fix-missing \
     build-essential \
     cmake \
@@ -23,17 +74,43 @@ RUN apt-get install -y --fix-missing \
     python3-dev \
     python3-numpy \
     software-properties-common \
-    zip \
-    && apt-get clean && rm -rf /tmp/* /var/tmp/*
+    zip 
+#Optional packages for opencv
+RUN apt-get install -y --fix-missing \
+	python-dev \
+	python-numpy \
+	libtbb2 \
+	libtbb-dev \
+	libjpeg-dev \
+	libpng-dev \
+	libtiff-dev \
+	libjasper-dev \
+	libdc1394-22-dev
+#Optional packages for opencv
+RUN apt-get install -y --fix-missing gcc \
+	g++ \
+	gtk2.0 \
+	libv4l-dev \
+	ffmpeg \
+	gstreamer1.0-plugins-base
+#Optional packages for opencv -update latest version , not needed
+#RUN apt-get install libpng-dev \
+#	libjpeg-turbo-dev \
+#	jasper-dev \
+#	openexr-dev \
+#	libtiff-dev \
+#	libwebp-dev
 
+#Clean
+RUN apt-get clean && rm -rf /tmp/* /var/tmp/*
+
+#installing dlib
 RUN cd ~ && \
     mkdir -p dlib && \
     git clone -b 'v19.9' --single-branch https://github.com/davisking/dlib.git dlib/ && \
     cd  dlib/ && \
     python3 setup.py install --yes USE_AVX_INSTRUCTIONS
 
-
-# The rest of this file just runs an example script.
 
 # If you wanted to use this Dockerfile to run your own app instead, maybe you would do this:
 # COPY . /root/your_app_or_whatever
@@ -46,5 +123,58 @@ RUN cd /root/face_recognition && \
     pip3 install -r requirements.txt && \
     python3 setup.py install
 
-CMD cd /root/face_recognition/examples && \
-    python3 recognize_faces_in_pictures.py
+
+#Installing opencv -OLD VERSION
+#+++++++++++++++++++++++++++++++++++++
+#RUN cd ~ && \
+#	git clone https://github.com/opencv/opencv.git && \
+#	git clone https://github.com/opencv/opencv_contrib.git && \
+#	cd ~/opencv && \
+#	mkdir build && \
+#	cd build && \
+#	cmake -D CMAKE_BUILD_TYPE=Release -D CMAKE_BUILD_TYPE=Release -D CMAKE_INSTALL_PREFIX=/usr/local ..
+	
+#ENV PYTHON3_EXECUTABLE = /usr/bin/python3
+#ENV PYTHON_INCLUDE_DIR = /usr/include/python3.5m
+#ENV PYTHON_INCLUDE_DIR2 = /usr/include/x86_64-linux-gnu/python3.5m
+#ENV PYTHON_LIBRARY = /usr/lib/x86_64-linux-gnu/libpython3.5m.so
+#ENV PYTHON3_NUMPY_INCLUDE_DIRS = /usr/lib/python3/dist-packages/numpy/core/include/
+
+#RUN cd ~/opencv/build && \
+#	make
+#------------------------------------
+
+#installing opencv-python
+RUN cd ~ && \
+	git clone https://github.com/opencv/opencv.git && \
+	cd ~/opencv && \
+	mkdir build && \
+	cd build && \
+	cmake ../
+
+RUN cd ~/opencv/build && \
+	make && \
+	make install
+
+RUN pip install flask	
+	
+COPY docker_files/entry-point.sh /
+
+# Final setup: directories, permissions, ssh login, symlinks, etc
+RUN mkdir -p /home/user && \
+    mkdir -p /var/run/sshd && \
+    echo 'root:12345' | chpasswd && \
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd && \
+    chmod a+x /entry-point.sh
+
+WORKDIR /home/user
+EXPOSE 22 4545
+
+ENTRYPOINT ["/entry-point.sh"]
+CMD ["shell"]
+
+
+	
+#CMD cd /root/face_recognition/examples && \
+#    python3 recognize_faces_in_pictures.py
